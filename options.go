@@ -28,6 +28,12 @@ func WithStartDate(startDate time.Time) Option {
 	}
 }
 
+func WithEndDate(endDate time.Time) Option {
+	return func(signin ISignIn) {
+
+	}
+}
+
 func WithSignInterval(d time.Duration) Option {
 	return func(signin ISignIn) {
 		signin.setSignInterval(d)

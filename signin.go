@@ -27,6 +27,7 @@ type ISignIn interface {
 	setRedisKeyPrefix(prefix string)
 	setSignInterval(d time.Duration) // sign-in interval
 	setStartDate(startDate time.Time)
+	setEndDate(endDate time.Time)
 	setBitFieldType(bitType string)
 	SetDebug(bool)
 	Close() error
@@ -40,6 +41,8 @@ type signIn struct {
 	rkey_prefix string
 	interval    time.Duration
 	startDate   time.Time
+	endDate     time.Time
+	useEndDate  bool
 	bitType     string
 }
 
@@ -50,6 +53,7 @@ func NewSignIn(options ...Option) ISignIn {
 		interval:    DefaultSignInterval,
 		ctx:         context.Background(),
 		bitType:     "u63",
+		useEndDate:  false,
 	}
 	for _, option := range options {
 		option(s)
@@ -106,6 +110,9 @@ func (s *signIn) Sign(id string, date time.Time) (bool, error) {
 }
 
 func (s *signIn) getOffset(date time.Time) (int64, error) {
+	if s.useEndDate && date.After(s.endDate) {
+		date = s.endDate
+	}
 	return datetimeutil.GetPosFromF(
 		DefaultDateTimeFormat,
 		datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, s.startDate),
@@ -312,6 +319,11 @@ func (s *signIn) setSignInterval(d time.Duration) {
 
 func (s *signIn) setStartDate(startDate time.Time) {
 	s.startDate = startDate
+}
+
+func (s *signIn) setEndDate(endDate time.Time) {
+	s.endDate = endDate
+	s.useEndDate = true
 }
 
 func (s *signIn) setBitFieldType(bitType string) {
