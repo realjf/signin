@@ -77,12 +77,12 @@ func TestSigninPing(t *testing.T) {
 					return
 				}
 				t.Logf("total: %d", total1)
-				// states, err := s.GetSignStates("1", 0, 9)
-				// if err != nil {
-				// 	t.Errorf("%s", err)
-				// 	return
-				// }
-				// t.Logf("%v", states)
+				states, err := s.GetSignStates("1", time.Now())
+				if err != nil {
+					t.Errorf("%s", err)
+					return
+				}
+				t.Logf("%v", states)
 			} else {
 				// s := signin.NewSignIn(signin.WithRedisCluster(ts.addrs, ts.password))
 				// defer s.Close()

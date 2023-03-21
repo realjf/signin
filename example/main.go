@@ -35,7 +35,7 @@ func main() {
 		signin.WithSignInterval(time.Duration(1)*time.Second),
 		signin.WithStartDate(sdate),
 		signin.WithDebug(),
-		signin.WithBitFieldType("u8"),
+		// signin.WithBitFieldType("u64"),
 	)
 	defer s.Close()
 
@@ -59,7 +59,7 @@ func main() {
 		return
 	}
 	fmt.Printf("total: %d\n", total1)
-	states, err := s.GetSignStates("1", sdate)
+	states, err := s.GetSignStates("1", time.Now())
 	if err != nil {
 		fmt.Printf("%s\n", err)
 		return

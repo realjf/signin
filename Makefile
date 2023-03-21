@@ -12,7 +12,7 @@ push:
 build:
 	@go build -ldflags='-s -w' -o ${BIN} ./example/main.go
 
-run:
+run: build
 	@chmod +x ./${BIN}
 	@sudo ./${BIN}
 

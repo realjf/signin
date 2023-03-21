@@ -14,14 +14,14 @@ const (
 	SignBit               int              = 1
 	DefaultRedisKeyPrefix string           = "signin"
 	DefaultSignInterval   time.Duration    = time.Duration(24) * time.Hour
-	DefaultDateTimeFormat datetimeutil.DTF = datetimeutil.F_YYYYMMDDhhmmss
+	DefaultDateTimeFormat datetimeutil.DTF = datetimeutil.F_YYYYMMDDhhmmss_hyphen
 )
 
 type ISignIn interface {
-	Sign(id string, date time.Time) (bool, error)                    // sign-in
-	SignCount(id string, start, end int64) (int64, error)            // returns the number of sign-in days
-	ConsecutiveSignCount(id string, date time.Time) (int64, error)   // returns the number of consecutive sign-in days
-	GetSignStates(id string, date time.Time) (map[string]int, error) // get the states of sign-in
+	Sign(id string, date time.Time) (bool, error)                       // sign-in
+	SignCount(id string, start, end int64) (int64, error)               // returns the number of sign-in days
+	ConsecutiveSignCount(id string, startDate time.Time) (int64, error) // returns the number of consecutive sign-in days
+	GetSignStates(id string, endDate time.Time) (map[string]int, error) // get the states of sign-in
 	setRedisClient(*redis.Client) error
 	setRedisCluster(*redis.ClusterClient) error
 	setRedisKeyPrefix(prefix string)
@@ -49,7 +49,7 @@ func NewSignIn(options ...Option) ISignIn {
 		rkey_prefix: DefaultRedisKeyPrefix,
 		interval:    DefaultSignInterval,
 		ctx:         context.Background(),
-		bitType:     "u2",
+		bitType:     "u63",
 	}
 	for _, option := range options {
 		option(s)
@@ -145,9 +145,9 @@ func (s *signIn) SignCount(id string, start, end int64) (int64, error) {
 
 // returns the number of days of consecutive sign-in
 // start = 1, end = -1 means get all
-func (s *signIn) ConsecutiveSignCount(id string, date time.Time) (int64, error) {
+func (s *signIn) ConsecutiveSignCount(id string, startDate time.Time) (int64, error) {
 	key := s.newSignRedisKey(id)
-	offset, err := s.getOffset(date)
+	offset, err := s.getOffset(startDate)
 	if err != nil {
 		return 0, err
 	}
@@ -191,16 +191,16 @@ func (s *signIn) ConsecutiveSignCount(id string, date time.Time) (int64, error) 
 }
 
 // start = 1, end = -1 means get all
-func (s *signIn) GetSignStates(id string, date time.Time) (states map[string]int, err error) {
+func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, error) {
 	key := s.newSignRedisKey(id)
-	offset, err := s.getOffset(date)
+	offset, err := s.getOffset(endDate)
 	if err != nil {
 		return nil, err
 	}
 	args := []interface{}{
 		"get",
 		s.bitType,
-		offset,
+		0,
 	}
 	var cmd *redis.IntSliceCmd
 	if s.cluster != nil {
@@ -220,16 +220,33 @@ func (s *signIn) GetSignStates(id string, date time.Time) (states map[string]int
 		return nil, nil
 	}
 	signBitmap := cmd.Val()[0]
-	for {
-		if (signBitmap & 1) == 0 {
-			break
-		} else {
+	count, err := datetimeutil.CountFromTime(DefaultDateTimeFormat, s.startDate, endDate, s.interval)
+	if err != nil {
+		return nil, err
+	}
+	states := make(map[string]int)
+	for i := count; i > 0; i-- {
+		if i > offset {
+			continue
+		}
 
+		datetime, err := datetimeutil.AddDuration(
+			DefaultDateTimeFormat,
+			datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, s.startDate),
+			time.Duration(i)*s.interval,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if signBitmap>>1<<1 != signBitmap {
+			states[datetime] = 1
+		} else {
+			states[datetime] = 0
 		}
 		signBitmap = signBitmap >> 1
 	}
 
-	return states, err
+	return states, nil
 }
 
 func (s *signIn) setRedisClient(c *redis.Client) error {
