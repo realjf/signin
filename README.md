@@ -11,7 +11,7 @@ sign-in data structure on Redis cache (redis中的签到数据结构)
 - count the number of consecutive sign-in days (统计连续签到天数)
 - count the number of sign-in days (统计签到天数)
 - sign in (进行签到)
-- get all sign-in states (获取所有签到状态)
+- get sign-in states (获取签到状态)
 
 ### Q&A
 
