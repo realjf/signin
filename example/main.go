@@ -16,12 +16,10 @@ func main() {
 		addrs     []string
 		password  string
 		username  string
-		cluster   bool
 		startdate string
 	}{
 		addr:      "redis-12996.c60.us-west-1-2.ec2.cloud.redislabs.com:12996",
 		password:  "jK8YanVRZr2W7yr0cIQTLRbyyaH7twco",
-		cluster:   false,
 		startdate: "20230301",
 		username:  "default",
 	}
