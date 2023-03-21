@@ -30,7 +30,7 @@ func WithStartDate(startDate time.Time) Option {
 
 func WithEndDate(endDate time.Time) Option {
 	return func(signin ISignIn) {
-
+		signin.setEndDate(endDate)
 	}
 }
 
