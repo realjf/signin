@@ -52,7 +52,7 @@ func NewSignIn(options ...Option) ISignIn {
 		rkey_prefix: DefaultRedisKeyPrefix,
 		interval:    DefaultSignInterval,
 		ctx:         context.Background(),
-		bitType:     "u63",
+		bitType:     "u8",
 		useEndDate:  false,
 	}
 	for _, option := range options {
@@ -65,6 +65,10 @@ func NewSignIn(options ...Option) ISignIn {
 func (s *signIn) Sign(id string, date time.Time) (bool, error) {
 	// get key
 	key := s.newSignRedisKey(id)
+
+	if date.After(time.Now().Add(s.interval)) {
+		return false, fmt.Errorf("sign date must be before now")
+	}
 
 	offset, err := s.getOffset(date)
 	if err != nil {
@@ -121,7 +125,7 @@ func (s *signIn) getOffset(date time.Time) (int64, error) {
 }
 
 func (s *signIn) newSignRedisKey(id string) string {
-	sdate := datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, s.startDate)
+	sdate := datetimeutil.ParseDateFromTime(datetimeutil.F_YYYYMMDDhhmmss, s.startDate)
 	return fmt.Sprintf("%s:%s:%s", s.rkey_prefix, id, sdate)
 }
 
@@ -150,6 +154,14 @@ func (s *signIn) SignCount(id string, start, end int64) (int64, error) {
 	return cmd.Val(), nil
 }
 
+func (s *signIn) calcBitType(startDate time.Time, endDate time.Time) (string, error) {
+	count, err := datetimeutil.CountFromTime(DefaultDateTimeFormat, startDate, endDate, s.interval)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("u%d", count), nil
+}
+
 // returns the number of days of consecutive sign-in
 // start = 1, end = -1 means get all
 func (s *signIn) ConsecutiveSignCount(id string, startDate time.Time) (int64, error) {
@@ -158,9 +170,16 @@ func (s *signIn) ConsecutiveSignCount(id string, startDate time.Time) (int64, er
 	if err != nil {
 		return 0, err
 	}
+	bitType, err := s.calcBitType(startDate, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	if s.debug {
+		fmt.Printf("bittype: %s\n", bitType)
+	}
 	args := []interface{}{
 		"get",
-		s.bitType,
+		bitType,
 		offset,
 	}
 	var cmd *redis.IntSliceCmd
@@ -180,14 +199,19 @@ func (s *signIn) ConsecutiveSignCount(id string, startDate time.Time) (int64, er
 	if s.debug {
 		fmt.Printf("bitfield result length: %d\n", len(cmd.Val()))
 	}
-	if len(cmd.Val()) == 0 || cmd.Val()[0] == 0 {
-		return 0, nil
+	if len(cmd.Val()) == 0 {
+		return 0, fmt.Errorf("bitfield result length is 0")
 	}
 
 	signBitmap := cmd.Val()[0]
+	if s.debug {
+		fmt.Printf("bitmap value: %b\n", signBitmap)
+	}
 	var signedDays int64
 	for {
-		if (signBitmap & 1) == 0 {
+		compareBitmap := signBitmap >> 1
+		compareBitmap = compareBitmap << 1
+		if compareBitmap == signBitmap {
 			break
 		} else {
 			signedDays++
@@ -204,9 +228,16 @@ func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, er
 	if err != nil {
 		return nil, err
 	}
+	bitType, err := s.calcBitType(s.startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	if s.debug {
+		fmt.Printf("bittype: %s\n", bitType)
+	}
 	args := []interface{}{
 		"get",
-		s.bitType,
+		bitType,
 		0,
 	}
 	var cmd *redis.IntSliceCmd
@@ -227,6 +258,9 @@ func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, er
 		return nil, nil
 	}
 	signBitmap := cmd.Val()[0]
+	if s.debug {
+		fmt.Printf("bitmap value: %b\n", signBitmap)
+	}
 	count, err := datetimeutil.CountFromTime(DefaultDateTimeFormat, s.startDate, endDate, s.interval)
 	if err != nil {
 		return nil, err
@@ -240,12 +274,14 @@ func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, er
 		datetime, err := datetimeutil.AddDuration(
 			DefaultDateTimeFormat,
 			datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, s.startDate),
-			time.Duration(i)*s.interval,
+			time.Duration(i-1)*s.interval,
 		)
 		if err != nil {
 			return nil, err
 		}
-		if signBitmap>>1<<1 != signBitmap {
+		compareBitmap := signBitmap >> 1
+		compareBitmap = compareBitmap << 1
+		if compareBitmap != signBitmap {
 			states[datetime] = 1
 		} else {
 			states[datetime] = 0

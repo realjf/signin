@@ -46,24 +46,21 @@ func TestSigninPing(t *testing.T) {
 				}
 				s := signin.NewSignIn(
 					signin.WithRedisClient(ts.addr, ts.password, ts.username),
-					signin.WithSignInterval(time.Duration(1)*time.Second),
+					signin.WithSignInterval(time.Duration(24)*time.Hour),
 					signin.WithStartDate(sdate),
 					signin.WithDebug(),
-					signin.WithBitFieldType("u63"),
 				)
 				defer s.Close()
 
 				for i := int64(0); i < 10; i++ {
 					if rand.Intn(2) == 1 {
-						date := sdate.Add(time.Duration(i) * time.Second)
+						date := sdate.Add(time.Duration(i*24) * time.Hour)
 						t.Logf("date: %s", datetimeutil.ParseDateFromTime(datetimeutil.F_YYYYMMDDhhmmss_hyphen, date))
 						ok, err := s.Sign("1", date)
 						if !ok {
 							t.Errorf("sign: %v", err)
 						}
 					}
-
-					time.Sleep(1 * time.Second)
 				}
 				total, err := s.SignCount("1", 0, 9)
 				if err != nil {
