@@ -19,9 +19,11 @@ const (
 
 type ISignIn interface {
 	Sign(id string, date time.Time) (bool, error)                       // sign-in
-	SignCount(id string, start, end int64) (int64, error)               // returns the number of sign-in days
-	ConsecutiveSignCount(id string, startDate time.Time) (int64, error) // returns the number of consecutive sign-in days
+	SignCount(id string, start, end int64) (int64, error)               // returns the number of sign-in
+	ConsecutiveSignCount(id string, startDate time.Time) (int64, error) // returns the number of consecutive sign-in
 	GetSignStates(id string, endDate time.Time) (map[string]int, error) // get the states of sign-in
+	GetFirstSign(id string, startDate time.Time) (time.Time, error)     // get the first sign-in
+	CheckSign(id string, date time.Time) (bool, error)                  // check if sign-in
 	setRedisClient(*redis.Client) error
 	setRedisCluster(*redis.ClusterClient) error
 	setRedisKeyPrefix(prefix string)
@@ -31,6 +33,8 @@ type ISignIn interface {
 	setBitFieldType(bitType string)
 	SetDebug(bool)
 	Close() error
+	GetStartDate() time.Time
+	GetEndDate() time.Time
 }
 
 type signIn struct {
@@ -66,7 +70,7 @@ func (s *signIn) Sign(id string, date time.Time) (bool, error) {
 	// get key
 	key := s.newSignRedisKey(id)
 
-	if date.After(time.Now().Add(s.interval)) {
+	if date.Unix() > time.Now().Unix() {
 		return false, fmt.Errorf("sign date must be before now")
 	}
 
@@ -81,24 +85,31 @@ func (s *signIn) Sign(id string, date time.Time) (bool, error) {
 	if s.cluster != nil {
 		// check if today is signed
 		isSign := s.cluster.GetBit(s.ctx, key, offset)
-		if isSign != nil && isSign.Err() != nil && isSign.Val() == 1 {
-			// already signed
-			return true, nil
+		if isSign == nil {
+			return false, fmt.Errorf("redis getbit failed")
 		}
 		if isSign.Err() != nil {
 			return false, isSign.Err()
+		}
+		if isSign.Val() == 1 {
+			// already signed
+			return true, fmt.Errorf("you have already signed")
 		}
 		// signin
 		cmd = s.cluster.SetBit(s.ctx, key, offset, SignBit)
 	} else if s.client != nil {
 		// check if today is signed
 		isSign := s.client.GetBit(s.ctx, key, offset)
-		if isSign != nil && isSign.Err() != nil && isSign.Val() == 1 {
-			// already signed
-			return true, nil
+
+		if isSign == nil {
+			return false, fmt.Errorf("redis getbit failed")
 		}
 		if isSign.Err() != nil {
 			return false, isSign.Err()
+		}
+		if isSign.Val() == 1 {
+			// already signed
+			return true, fmt.Errorf("you have already signed")
 		}
 		// signin
 		cmd = s.client.SetBit(s.ctx, key, offset, SignBit)
@@ -121,7 +132,7 @@ func (s *signIn) getOffset(date time.Time) (int64, error) {
 		DefaultDateTimeFormat,
 		datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, s.startDate),
 		datetimeutil.ParseDateFromTime(DefaultDateTimeFormat, date),
-		s.interval)
+		s.interval, true)
 }
 
 func (s *signIn) newSignRedisKey(id string) string {
@@ -129,7 +140,7 @@ func (s *signIn) newSignRedisKey(id string) string {
 	return fmt.Sprintf("%s:%s:%s", s.rkey_prefix, id, sdate)
 }
 
-// returns the number of days of sign-in
+// returns the number of sign-in
 // start = 1, end = -1 means get all
 func (s *signIn) SignCount(id string, start, end int64) (int64, error) {
 	key := s.newSignRedisKey(id)
@@ -162,7 +173,7 @@ func (s *signIn) calcBitType(startDate time.Time, endDate time.Time) (string, er
 	return fmt.Sprintf("u%d", count), nil
 }
 
-// returns the number of days of consecutive sign-in
+// returns the number of consecutive sign-in
 // start = 1, end = -1 means get all
 func (s *signIn) ConsecutiveSignCount(id string, startDate time.Time) (int64, error) {
 	key := s.newSignRedisKey(id)
@@ -248,6 +259,9 @@ func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, er
 	} else {
 		return nil, fmt.Errorf("redis client invalid")
 	}
+	if cmd == nil {
+		return nil, fmt.Errorf("redis error: bitfield falied")
+	}
 	if cmd.Err() != nil {
 		return nil, cmd.Err()
 	}
@@ -290,6 +304,84 @@ func (s *signIn) GetSignStates(id string, endDate time.Time) (map[string]int, er
 	}
 
 	return states, nil
+}
+
+// get the first sign-in
+func (s *signIn) GetFirstSign(id string, startDate time.Time) (time.Time, error) {
+	// get key
+	key := s.newSignRedisKey(id)
+	spos, err := s.getOffset(startDate)
+	if err != nil {
+		return time.Now(), err
+	}
+	if s.debug {
+		fmt.Printf("start pos: %d\n", spos)
+	}
+	var cmd *redis.IntCmd
+	if s.cluster != nil {
+		// check if today is signed
+		cmd = s.cluster.BitPos(s.ctx, key, int64(SignBit), spos)
+
+	} else if s.client != nil {
+		// check if today is signed
+		cmd = s.client.BitPos(s.ctx, key, int64(SignBit), spos)
+	} else {
+		return time.Now(), fmt.Errorf("redis client invalid")
+	}
+
+	if cmd == nil {
+		return time.Now(), fmt.Errorf("bitpos return invalid pointer")
+	}
+	if cmd.Err() != nil {
+		return time.Now(), cmd.Err()
+	}
+	// get offset
+	offset := cmd.Val()
+	if offset < 0 {
+		return time.Now(), fmt.Errorf("not found")
+	}
+	date := s.startDate.Add(time.Duration(offset) * s.interval)
+
+	return date, nil
+}
+
+// check if sign-in
+func (s *signIn) CheckSign(id string, date time.Time) (bool, error) {
+	// get key
+	key := s.newSignRedisKey(id)
+
+	offset, err := s.getOffset(date)
+	if err != nil {
+		return false, err
+	}
+	if s.debug {
+		fmt.Printf("offset: %d\n", offset)
+	}
+
+	var cmd *redis.IntCmd
+	if s.cluster != nil {
+		// check if today is signed
+		cmd = s.cluster.GetBit(s.ctx, key, offset)
+
+	} else if s.client != nil {
+		// check if today is signed
+		cmd = s.client.GetBit(s.ctx, key, offset)
+	} else {
+		return false, fmt.Errorf("redis client invalid")
+	}
+
+	if cmd == nil {
+		return false, fmt.Errorf("getbit return invalid pointer")
+	}
+	if cmd.Err() != nil {
+		return false, cmd.Err()
+	}
+	// get offset
+	if cmd.Val() == 0 {
+		return false, fmt.Errorf("you have not signed")
+	}
+
+	return true, nil
 }
 
 func (s *signIn) setRedisClient(c *redis.Client) error {
@@ -364,4 +456,12 @@ func (s *signIn) setEndDate(endDate time.Time) {
 
 func (s *signIn) setBitFieldType(bitType string) {
 	s.bitType = bitType
+}
+
+func (s *signIn) GetStartDate() time.Time {
+	return s.startDate
+}
+
+func (s *signIn) GetEndDate() time.Time {
+	return s.endDate
 }

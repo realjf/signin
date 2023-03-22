@@ -20,7 +20,7 @@ func main() {
 	}{
 		addr:      "redis-12996.c60.us-west-1-2.ec2.cloud.redislabs.com:12996",
 		password:  "jK8YanVRZr2W7yr0cIQTLRbyyaH7twco",
-		startdate: "20230315",
+		startdate: "20230313",
 		username:  "default",
 	}
 	sdate, err := datetimeutil.ParseDate2Time(datetimeutil.F_YYYYMMDD, ts.startdate)
@@ -67,4 +67,16 @@ func main() {
 	for d, st := range states {
 		fmt.Printf("states: %s %d\n", d, st)
 	}
+	firstSign, err := s.GetFirstSign("1", s.GetStartDate())
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+	fmt.Printf("first sign date: %s\n", datetimeutil.ParseDateFromTime(datetimeutil.F_YYYYMMDDhhmmss_hyphen, firstSign))
+	checkSign, err := s.CheckSign("1", time.Now())
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+	fmt.Printf("today sign: %v\n", checkSign)
 }

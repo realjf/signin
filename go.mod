@@ -3,7 +3,7 @@ module github.com/realjf/signin
 go 1.20
 
 require (
-	github.com/realjf/datetimeutil v0.0.8
+	github.com/realjf/datetimeutil v0.0.10
 	github.com/redis/go-redis/v9 v9.0.2
 )
 
