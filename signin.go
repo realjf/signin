@@ -35,6 +35,7 @@ type ISignIn interface {
 	Close() error
 	GetStartDate() time.Time
 	GetEndDate() time.Time
+	GetInterval() time.Duration
 }
 
 type signIn struct {
@@ -464,4 +465,8 @@ func (s *signIn) GetStartDate() time.Time {
 
 func (s *signIn) GetEndDate() time.Time {
 	return s.endDate
+}
+
+func (s *signIn) GetInterval() time.Duration {
+	return s.interval
 }
